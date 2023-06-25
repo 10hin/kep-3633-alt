@@ -16,9 +16,10 @@ So, I implement this according to [KEP][original-kep-referencing].
 - [ ] Implement webhook
     - [ ] append `.spec.affinity.podAffinity.required...duling`
     - [ ] append `.spec.affinity.podAffinity.preferred...duling`
-    - [X] append `.spec.affinity.podAntiAffinity.required...duling`
+    - [ ] append `.spec.affinity.podAntiAffinity.required...duling`
     - [ ] append `.spec.affinity.podAntiAffinity.preferred...duling`
-- [ ] Build and publish container image
+- [X] Build and publish container image
+    - published to `ghcr.io/10hin/kep3633alt:latest`
 - [ ] Write installation manifest
     - [ ] Kustomize manifest (depends on [cert-manager](https://cert-manager.io) to provision webhook certificates)
     - [ ] Helm chart without dependencies to cert-manager
