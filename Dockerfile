@@ -9,4 +9,4 @@ FROM public.ecr.aws/docker/library/alpine:latest AS runner
 
 COPY --from=builder /kep3633alt /kep3633alt
 
-CMD["/kep3633alt"]
+CMD ["/kep3633alt"]
