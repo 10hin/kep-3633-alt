@@ -7,6 +7,6 @@ RUN CGO_ENABLED=0 go build -o /kep3633alt main.go \
 
 FROM public.ecr.aws/docker/library/alpine:latest AS runner
 
-COPY --from=builder --chmod /kep3633alt /kep3633alt
+COPY --from=builder /kep3633alt /kep3633alt
 
 CMD["/kep3633alt"]
