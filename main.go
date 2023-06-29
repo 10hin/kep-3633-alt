@@ -72,7 +72,7 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 	}
 
 	reqReview := &admissionv1.AdmissionReview{}
-	err = reqReview.Unmarshal(bodyBytes)
+	err = json.Unmarshal(bodyBytes, reqReview)
 	if err != nil {
 		panic(handleClientError(resp, err, "invalid request: failed to unmarshal request body"))
 	}
@@ -99,7 +99,7 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 	}
 
 	reqObject := &corev1.Pod{}
-	err = reqObject.Unmarshal(reviewRequest.Object.Raw)
+	err = json.Unmarshal(reviewRequest.Object.Raw, reqObject)
 	if err != nil {
 		panic(handleClientError(resp, err, "failed to unmarshal request.object as core/v1/pods"))
 	}
