@@ -123,7 +123,7 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 
 	patch := make([]map[string]interface{}, 0)
 
-	var affinityField *corev1.Affinity
+	var affinityField = reqObject.Spec.Affinity
 	//var podAffinityField *corev1.PodAffinity
 	//var podHardAffinityField []corev1.PodAffinityTerm
 	//var podSoftAffinityField []corev1.WeightedPodAffinityTerm
@@ -146,16 +146,16 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 	if hardAntiAffinitiesAppending != nil && len(hardAntiAffinitiesAppending) > 0 {
 		if podHardAntiAffinityField == nil {
 			patch = append(patch, map[string]interface{}{
-				"op":     "add",
-				"key":    "/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution",
-				"values": hardAntiAffinitiesAppending,
+				"op":    "add",
+				"key":   "/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution",
+				"value": hardAntiAffinitiesAppending,
 			})
 		} else {
 			for _, a := range hardAntiAffinitiesAppending {
 				patch = append(patch, map[string]interface{}{
-					"op":     "add",
-					"key":    "/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution/-",
-					"values": a,
+					"op":    "add",
+					"key":   "/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution/-",
+					"value": a,
 				})
 			}
 		}
