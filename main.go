@@ -88,12 +88,12 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 		panic(handleClientError(resp, err, ""))
 	}
 
-	if *reviewRequest.RequestResource != podsv1GVR {
+	if reviewRequest.Resource != podsv1GVR {
 		err = fmt.Errorf("accept only core/v1/pods")
 		panic(handleClientError(resp, err, ""))
 	}
 
-	if reviewRequest.RequestSubResource != "" {
+	if reviewRequest.SubResource != "" {
 		err = fmt.Errorf("accept only core/v1/pods itself, not subresources")
 		panic(handleClientError(resp, err, ""))
 	}
@@ -183,7 +183,9 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 
 	resp.WriteHeader(http.StatusOK)
 	_, err = resp.Write(respBytes)
-	log.Printf("failed to write response: %#v", err)
+	if err != nil {
+		log.Printf("failed to write response: %#v", err)
+	}
 
 }
 
@@ -199,12 +201,10 @@ func createHardAffinitiesAppending(source string, labels map[string]string) ([]c
 		labelSelector := term.LabelSelector
 		if labelSelector == nil {
 			labelSelector = &metav1.LabelSelector{}
-			term.LabelSelector = labelSelector
 		}
 		matchExp := labelSelector.MatchExpressions
-		if matchExp != nil {
+		if matchExp == nil {
 			matchExp = make([]metav1.LabelSelectorRequirement, 0, len(kep3633term.MatchLabelKeys))
-			labelSelector.MatchExpressions = matchExp
 		}
 		for _, k := range kep3633term.MatchLabelKeys {
 			requirement := matchLabelKeyToRequirement(k, labels)
@@ -218,6 +218,8 @@ func createHardAffinitiesAppending(source string, labels map[string]string) ([]c
 				matchExp = append(matchExp, *requirement)
 			}
 		}
+		labelSelector.MatchExpressions = matchExp
+		term.LabelSelector = labelSelector
 		hardAntiAffinitiesAppending = append(hardAntiAffinitiesAppending, term)
 	}
 	return hardAntiAffinitiesAppending, nil
@@ -326,12 +328,12 @@ func (w *serverWrapper) Serve(l net.Listener) error {
 }
 
 type KEP3633WeightedPodAffinityTerm struct {
-	corev1.WeightedPodAffinityTerm
-	PodAffinityTerm KEP3633PodAffinityTerm `json:"podAffinityTerm:omitempty"`
+	corev1.WeightedPodAffinityTerm `json:",inline"`
+	PodAffinityTerm                KEP3633PodAffinityTerm `json:"podAffinityTerm,omitempty"`
 }
 
 type KEP3633PodAffinityTerm struct {
-	corev1.PodAffinityTerm
-	MatchLabelKeys    []string `json:"matchLabelKeys:omitempty"`
-	MismatchLabelKeys []string `json:"mismatchLabelKeys:omitempty"`
+	corev1.PodAffinityTerm `json:",inline"`
+	MatchLabelKeys         []string `json:"matchLabelKeys,omitempty"`
+	MismatchLabelKeys      []string `json:"mismatchLabelKeys,omitempty"`
 }
