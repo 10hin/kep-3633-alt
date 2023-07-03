@@ -16,12 +16,12 @@ import (
 )
 
 const (
-	HTTP_HEADER_KEY_CONTENT_TYPE = "content-type"
-	MIME_TYPE_APPLICATION_JSON   = "application/json"
-	//ANNOTATION_KEY_POD_AFFINITY_SOFT      = "kep-3633-alt.10h.in/podAffinity.preferredDuringSchedulingIgnoredDuringExecution"
-	//ANNOTATION_KEY_POD_AFFINITY_HARD      = "kep-3633-alt.10h.in/podAffinity.requiredDuringSchedulingIgnoredDuringExecution"
-	//ANNOTATION_KEY_POD_ANTI_AFFINITY_SOFT = "kep-3633-alt.10h.in/podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution"
-	ANNOTATION_KEY_POD_ANTI_AFFINITY_HARD = "kep-3633-alt.10h.in/podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution"
+	httpHeaderKeyContentType         = "content-type"
+	mimeTypeApplicationJson          = "application/json"
+	annotationKeyPodAffinitySoft     = "kep-3633-alt.10h.in/podAffinity.preferredDuringSchedulingIgnoredDuringExecution"
+	annotationKeyPodAffinityHard     = "kep-3633-alt.10h.in/podAffinity.requiredDuringSchedulingIgnoredDuringExecution"
+	annotationKeyPodAntiAffinitySoft = "kep-3633-alt.10h.in/podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution"
+	annotationKeyPodAntiAffinityHard = "kep-3633-alt.10h.in/podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution"
 )
 
 var (
@@ -107,11 +107,35 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 	labels := reqObject.GetLabels()
 	annotations := reqObject.GetAnnotations()
 
+	var hardAffinitiesAppending []corev1.PodAffinityTerm
+	var softAffinitiesAppending []corev1.WeightedPodAffinityTerm
 	var hardAntiAffinitiesAppending []corev1.PodAffinityTerm
+	var softAntiAffinitiesAppending []corev1.WeightedPodAffinityTerm
 
+	var hardPodAffinitySource string
+	var softPodAffinitySource string
 	var hardPodAntiAffinitySource string
+	var softPodAntiAffinitySource string
 	var exists bool
-	hardPodAntiAffinitySource, exists = annotations[ANNOTATION_KEY_POD_ANTI_AFFINITY_HARD]
+	hardPodAffinitySource, exists = annotations[annotationKeyPodAffinityHard]
+	if exists {
+		hardAffinitiesAppending, err = createHardAffinitiesAppending(hardPodAffinitySource, labels)
+		if err != nil {
+			// TODO: annotate pod with error message or publish events
+			log.Printf("failed to create PodAffinityTerm: %#v", err)
+			return
+		}
+	}
+	softPodAffinitySource, exists = annotations[annotationKeyPodAffinitySoft]
+	if exists {
+		softAffinitiesAppending, err = createSoftAffinitiesAppending(softPodAffinitySource, labels)
+		if err != nil {
+			// TODO: annotate pod with error message or publish events
+			log.Printf("failed to create WeightedPodAffinityTerm: %#v", err)
+			return
+		}
+	}
+	hardPodAntiAffinitySource, exists = annotations[annotationKeyPodAntiAffinityHard]
 	if exists {
 		hardAntiAffinitiesAppending, err = createHardAffinitiesAppending(hardPodAntiAffinitySource, labels)
 		if err != nil {
@@ -120,27 +144,72 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
+	softPodAntiAffinitySource, exists = annotations[annotationKeyPodAntiAffinitySoft]
+	if exists {
+		softAntiAffinitiesAppending, err = createSoftAffinitiesAppending(softPodAntiAffinitySource, labels)
+		if err != nil {
+			// TODO: annotate pod with error message or publish events
+			log.Printf("failed to create WeightedPodAffinityTerm: %#v", err)
+			return
+		}
+	}
 
 	patch := make([]map[string]interface{}, 0)
 
 	var affinityField = reqObject.Spec.Affinity
-	//var podAffinityField *corev1.PodAffinity
-	//var podHardAffinityField []corev1.PodAffinityTerm
-	//var podSoftAffinityField []corev1.WeightedPodAffinityTerm
+	var podAffinityField *corev1.PodAffinity
+	var podHardAffinityField []corev1.PodAffinityTerm
+	var podSoftAffinityField []corev1.WeightedPodAffinityTerm
 	var podAntiAffinityField *corev1.PodAntiAffinity
 	var podHardAntiAffinityField []corev1.PodAffinityTerm
-	//var podSoftAntiAffinityField []corev1.WeightedPodAffinityTerm
+	var podSoftAntiAffinityField []corev1.WeightedPodAffinityTerm
 	if affinityField != nil {
-		//podAffinityField = affinityField.PodAffinity
+		podAffinityField = affinityField.PodAffinity
 		podAntiAffinityField = affinityField.PodAntiAffinity
 	}
-	//if podAffinityField != nil {
-	//	podHardAffinityField = podAffinityField.RequiredDuringSchedulingIgnoredDuringExecution
-	//	podSoftAffinityField = podAffinityField.PreferredDuringSchedulingIgnoredDuringExecution
-	//}
+	if podAffinityField != nil {
+		podHardAffinityField = podAffinityField.RequiredDuringSchedulingIgnoredDuringExecution
+		podSoftAffinityField = podAffinityField.PreferredDuringSchedulingIgnoredDuringExecution
+	}
 	if podAntiAffinityField != nil {
 		podHardAntiAffinityField = podAntiAffinityField.RequiredDuringSchedulingIgnoredDuringExecution
-		//podSoftAntiAffinityField = podAntiAffinityField.PreferredDuringSchedulingIgnoredDuringExecution
+		podSoftAntiAffinityField = podAntiAffinityField.PreferredDuringSchedulingIgnoredDuringExecution
+	}
+
+	if hardAffinitiesAppending != nil && len(hardAffinitiesAppending) > 0 {
+		if podHardAffinityField == nil {
+			patch = append(patch, map[string]interface{}{
+				"op":    "add",
+				"key":   "/spec/affinity/podAffinity/requiredDuringSchedulingIgnoredDuringExecution",
+				"value": hardAffinitiesAppending,
+			})
+		} else {
+			for _, a := range hardAffinitiesAppending {
+				patch = append(patch, map[string]interface{}{
+					"op":    "add",
+					"key":   "/spec/affinity/podAffinity/requiredDuringSchedulingIgnoredDuringExecution/-",
+					"value": a,
+				})
+			}
+		}
+	}
+
+	if softAffinitiesAppending != nil && len(softAffinitiesAppending) > 0 {
+		if podSoftAffinityField == nil {
+			patch = append(patch, map[string]interface{}{
+				"op":    "add",
+				"key":   "/spec/affinity/podAffinity/preferredDuringSchedulingIgnoredDuringExecution",
+				"value": softAffinitiesAppending,
+			})
+		} else {
+			for _, a := range softAffinitiesAppending {
+				patch = append(patch, map[string]interface{}{
+					"op":    "add",
+					"key":   "/spec/affinity/podAffinity/preferredDuringSchedulingIgnoredDuringExecution/-",
+					"value": a,
+				})
+			}
+		}
 	}
 
 	if hardAntiAffinitiesAppending != nil && len(hardAntiAffinitiesAppending) > 0 {
@@ -148,13 +217,31 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 			patch = append(patch, map[string]interface{}{
 				"op":    "add",
 				"key":   "/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution",
-				"value": hardAntiAffinitiesAppending,
+				"value": hardAffinitiesAppending,
 			})
 		} else {
 			for _, a := range hardAntiAffinitiesAppending {
 				patch = append(patch, map[string]interface{}{
 					"op":    "add",
 					"key":   "/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution/-",
+					"value": a,
+				})
+			}
+		}
+	}
+
+	if softAntiAffinitiesAppending != nil && len(softAntiAffinitiesAppending) > 0 {
+		if podSoftAntiAffinityField == nil {
+			patch = append(patch, map[string]interface{}{
+				"op":    "add",
+				"key":   "/spec/affinity/podAntiAffinity/preferredDuringSchedulingIgnoredDuringExecution",
+				"value": softAntiAffinitiesAppending,
+			})
+		} else {
+			for _, a := range softAntiAffinitiesAppending {
+				patch = append(patch, map[string]interface{}{
+					"op":    "add",
+					"key":   "/spec/affinity/podAntiAffinity/preferredDuringSchedulingIgnoredDuringExecution/-",
 					"value": a,
 				})
 			}
@@ -190,13 +277,13 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 }
 
 func createHardAffinitiesAppending(source string, labels map[string]string) ([]corev1.PodAffinityTerm, error) {
-	var hardAntiAffinities []KEP3633PodAffinityTerm
-	err := json.Unmarshal(([]byte)(source), &hardAntiAffinities)
+	var hardAffinities []KEP3633PodAffinityTerm
+	err := json.Unmarshal(([]byte)(source), &hardAffinities)
 	if err != nil {
 		return nil, err
 	}
-	hardAntiAffinitiesAppending := make([]corev1.PodAffinityTerm, 0, len(hardAntiAffinities))
-	for _, kep3633term := range hardAntiAffinities {
+	hardAffinitiesAppending := make([]corev1.PodAffinityTerm, 0, len(hardAffinities))
+	for _, kep3633term := range hardAffinities {
 		term := *(kep3633term.PodAffinityTerm.DeepCopy())
 		labelSelector := term.LabelSelector
 		if labelSelector == nil {
@@ -220,9 +307,49 @@ func createHardAffinitiesAppending(source string, labels map[string]string) ([]c
 		}
 		labelSelector.MatchExpressions = matchExp
 		term.LabelSelector = labelSelector
-		hardAntiAffinitiesAppending = append(hardAntiAffinitiesAppending, term)
+		hardAffinitiesAppending = append(hardAffinitiesAppending, term)
 	}
-	return hardAntiAffinitiesAppending, nil
+	return hardAffinitiesAppending, nil
+}
+
+func createSoftAffinitiesAppending(source string, labels map[string]string) ([]corev1.WeightedPodAffinityTerm, error) {
+	log.Printf("[DEBUG] source: %#v", source)
+	var softAffinities []KEP3633WeightedPodAffinityTerm
+	err := json.Unmarshal(([]byte)(source), &softAffinities)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("[DEBUG] softAffinities: %#v", softAffinities)
+	softAffinitiesAppending := make([]corev1.WeightedPodAffinityTerm, 0, len(softAffinities))
+	for _, kep3633WeightedTerm := range softAffinities {
+		weightedTerm := *(kep3633WeightedTerm.WeightedPodAffinityTerm.DeepCopy())
+		weightedTerm.PodAffinityTerm = *(kep3633WeightedTerm.PodAffinityTerm.PodAffinityTerm.DeepCopy())
+		log.Printf("[DEBUG] weightedTerm: %#v", weightedTerm)
+		labelSelector := weightedTerm.PodAffinityTerm.LabelSelector
+		if labelSelector == nil {
+			labelSelector = &metav1.LabelSelector{}
+		}
+		matchExp := labelSelector.MatchExpressions
+		if matchExp == nil {
+			matchExp = make([]metav1.LabelSelectorRequirement, 0, len(kep3633WeightedTerm.PodAffinityTerm.MatchLabelKeys))
+		}
+		for _, k := range kep3633WeightedTerm.PodAffinityTerm.MatchLabelKeys {
+			requirement := matchLabelKeyToRequirement(k, labels)
+			if requirement != nil {
+				matchExp = append(matchExp, *requirement)
+			}
+		}
+		for _, k := range kep3633WeightedTerm.PodAffinityTerm.MismatchLabelKeys {
+			requirement := mismatchLabelKeyToRequirement(k, labels)
+			if requirement != nil {
+				matchExp = append(matchExp, *requirement)
+			}
+		}
+		labelSelector.MatchExpressions = matchExp
+		weightedTerm.PodAffinityTerm.LabelSelector = labelSelector
+		softAffinitiesAppending = append(softAffinitiesAppending, weightedTerm)
+	}
+	return softAffinitiesAppending, nil
 }
 
 func matchLabelKeyToRequirement(matchLabelKey string, labels map[string]string) *metav1.LabelSelectorRequirement {
@@ -272,7 +399,7 @@ func handleClientError(resp http.ResponseWriter, respError error, msg string) er
 		log.Printf("failed to format error to JSON response: %#v; original error: %#v", err, respError)
 		return handleServerError(resp, err, "server failure")
 	}
-	resp.Header().Add(HTTP_HEADER_KEY_CONTENT_TYPE, MIME_TYPE_APPLICATION_JSON)
+	resp.Header().Add(httpHeaderKeyContentType, mimeTypeApplicationJson)
 	resp.WriteHeader(400)
 	_, err = resp.Write(bodyBytes)
 	if err != nil {
@@ -295,7 +422,7 @@ func handleServerError(resp http.ResponseWriter, respError error, msg string) er
 		_, _ = resp.Write(([]byte)("server failure"))
 		return err
 	}
-	resp.Header().Add(HTTP_HEADER_KEY_CONTENT_TYPE, MIME_TYPE_APPLICATION_JSON)
+	resp.Header().Add(httpHeaderKeyContentType, mimeTypeApplicationJson)
 	resp.WriteHeader(400)
 	_, err = resp.Write(bodyBytes)
 	if err != nil {
