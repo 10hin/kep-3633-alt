@@ -39,6 +39,7 @@ func main() {
 
 	router := http.NewServeMux()
 	router.HandleFunc("/", mutate)
+	router.HandleFunc("/healthz", health)
 
 	var addr string
 	if *disableTLS {
@@ -58,6 +59,15 @@ func main() {
 		KeyFile:   "./tls.key",
 	}
 	log.Fatal(server.ListenAndServe())
+}
+
+func health(resp http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		resp.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	resp.WriteHeader(http.StatusOK)
+	_, _ = resp.Write(([]byte)("{\"status\":\"UP\"}"))
 }
 
 func mutate(resp http.ResponseWriter, req *http.Request) {
