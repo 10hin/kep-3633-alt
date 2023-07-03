@@ -45,6 +45,13 @@ spec:
               port: https
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: certs
+              mountPath: /tls.crt
+              subPath: tls.crt
+            - name: certs
+              mountPath: /tls.key
+              subPath: tls.key
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -57,3 +64,7 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      volumes:
+        - name: certs
+          secret:
+            secretName: {{ template "kep3633alt.webhookCertSecret" . }}
