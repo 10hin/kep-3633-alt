@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kep3633alt.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kep3633alt.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: https
+      protocol: TCP
+      name: https
+  selector:
+    {{- include "kep3633alt.selectorLabels" . | nindent 4 }}
