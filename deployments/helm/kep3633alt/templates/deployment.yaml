@@ -47,11 +47,7 @@ spec:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - name: certs
-              mountPath: /tls.crt
-              subPath: tls.crt
-            - name: certs
-              mountPath: /tls.key
-              subPath: tls.key
+              mountPath: /certs
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

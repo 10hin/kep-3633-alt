@@ -58,8 +58,8 @@ func main() {
 			WriteTimeout: 30 * time.Second,
 		},
 		EnableTLS: !*disableTLS,
-		CertFile:  "./tls.crt",
-		KeyFile:   "./tls.key",
+		CertFile:  "/certs/tls.crt",
+		KeyFile:   "/certs/tls.key",
 	}
 	log.Println("start server", addr)
 	log.Fatal(server.ListenAndServe())
