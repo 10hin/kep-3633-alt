@@ -268,6 +268,10 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 		// TODO: return 500
 	}
 	respReview := admissionv1.AdmissionReview{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: reqReview.APIVersion,
+			Kind:       reqReview.Kind,
+		},
 		Response: &admissionv1.AdmissionResponse{
 			Allowed:   true,
 			UID:       reviewRequest.UID,
