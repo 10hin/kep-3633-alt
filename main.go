@@ -327,18 +327,15 @@ func createHardAffinitiesAppending(source string, labels map[string]string) ([]c
 }
 
 func createSoftAffinitiesAppending(source string, labels map[string]string) ([]corev1.WeightedPodAffinityTerm, error) {
-	log.Printf("[DEBUG] source: %#v", source)
 	var softAffinities []KEP3633WeightedPodAffinityTerm
 	err := json.Unmarshal(([]byte)(source), &softAffinities)
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("[DEBUG] softAffinities: %#v", softAffinities)
 	softAffinitiesAppending := make([]corev1.WeightedPodAffinityTerm, 0, len(softAffinities))
 	for _, kep3633WeightedTerm := range softAffinities {
 		weightedTerm := *(kep3633WeightedTerm.WeightedPodAffinityTerm.DeepCopy())
 		weightedTerm.PodAffinityTerm = *(kep3633WeightedTerm.PodAffinityTerm.PodAffinityTerm.DeepCopy())
-		log.Printf("[DEBUG] weightedTerm: %#v", weightedTerm)
 		labelSelector := weightedTerm.PodAffinityTerm.LabelSelector
 		if labelSelector == nil {
 			labelSelector = &metav1.LabelSelector{}
