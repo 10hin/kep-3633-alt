@@ -18,6 +18,7 @@ spec:
       {{- end }}
       labels:
         {{- include "kep3633alt.selectorLabels" . | nindent 8 }}
+        kep-3633-alt.10h.in/ignore: 'true'
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:

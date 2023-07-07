@@ -18,7 +18,10 @@ webhooks:
     matchPolicy: Equivalent
     name: kep3633alt.kubernetes.10h.in
     namespaceSelector: {}
-    objectSelector: {}
+    objectSelector:
+      matchExpressions:
+        - key: kep-3633-alt.10h.in/ignore
+          operator: DoesNotExist
     rules:
       - apiGroups:
           - ''
