@@ -458,6 +458,13 @@ type serverWrapper struct {
 	KeyFile   string
 }
 
+func (w *serverWrapper) ListenAndServe() error {
+	if w.EnableTLS {
+		return w.Server.ListenAndServeTLS(w.CertFile, w.KeyFile)
+	}
+	return w.Server.ListenAndServe()
+}
+
 func (w *serverWrapper) Serve(l net.Listener) error {
 	if w.EnableTLS {
 		return w.Server.ServeTLS(l, w.CertFile, w.KeyFile)
