@@ -36,6 +36,7 @@ var (
 
 func main() {
 	flag.Parse()
+	log.Println("start application...")
 
 	router := http.NewServeMux()
 	router.HandleFunc("/", mutate)
@@ -44,8 +45,10 @@ func main() {
 	var addr string
 	if *disableTLS {
 		addr = ":8080"
+		log.Println("TLS disabled; listen address:", addr)
 	} else {
 		addr = ":8443"
+		log.Println("TLS enabled; listen address:", addr)
 	}
 	server := serverWrapper{
 		Server: http.Server{
@@ -58,6 +61,7 @@ func main() {
 		CertFile:  "./tls.crt",
 		KeyFile:   "./tls.key",
 	}
+	log.Println("start server", addr)
 	log.Fatal(server.ListenAndServe())
 }
 
