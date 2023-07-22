@@ -22,12 +22,109 @@ So, I implement this according to [KEP][original-kep-referencing].
     - published to `ghcr.io/10hin/kep3633alt:latest`
 - [ ] Write installation manifest
     - [ ] Kustomize manifest (depends on [cert-manager](https://cert-manager.io) to provision webhook certificates)
-    - [ ] Helm chart without dependencies to cert-manager
+    - [X] Helm chart without dependencies to cert-manager
 
 ## Install
 
-> TODO
+Use `helm` with adding our repository:
+
+```shell
+helm repo add kep3633alt https://10hin.github.io/kep-3633-alt
+helm repo update
+helm upgrade -i -n kube-system kep3633alt kep3633alt/kep3633alt
+```
+
+Or without it:
+
+```shell
+helm upgrade -i -n kube-system kep3633alt kep3633alt --repo https://10hin.github.io/kep-3633-alt
+```
+
+Chart source is [here](./deployments/helm/kep3633alt).
 
 ## Usage
 
-> TODO
+After [installation](#install), deploy pods with pod affinity (or anti-affinity) configured not on `spec` but on `annotations` with JSON format.
+
+If you have pod manifest (typically as pod template in deployment resource) using KEP3633 like following:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  labels:
+    app: nginx
+    pod-template-hash: UNEXPECTABLEVALUE
+spec:
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app: nginx
+        topologyKey: topology.kubernetes.io/zone
+        matchLabelKeys:
+        - pod-template-hash
+  # ...
+```
+
+above manifest may invalid for now. So, you can alternate it as follows:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    kep-3633-alt.10h.in/podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution: |
+      [
+        {
+          "labelSelector": {
+            "matchLabels": {
+              "app": "nginx"
+            }
+          },
+          "topologyKey": "topology.kubernetes.io/zone",
+          "matchLabelKeys": [
+            "pod-template-hash"
+          ]
+        }
+      ]
+  name: nginx
+  labels:
+    app: nginx
+    pod-template-hash: UNEXPECTABLEVALUE
+spec:
+  # ...
+```
+
+then it applied as follows:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    kep-3633-alt.10h.in/podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution: |
+      # reduced
+  name: nginx
+  labels:
+    app: nginx
+    pod-template-hash: UNEXPECTABLEVALUE
+spec:
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app: nginx
+              pod-template-hash: UNEXPECTABLEVALUE
+          topologyKey: topology.kubernetes.io/zone
+  # ...
+```
+
+## Usecases
+
+see [KEP3633][kep-3633-userstory]
+
+[kep-3633-userstory]: https://github.com/kubernetes/enhancements/tree/master/keps/sig-scheduling/3633-matchlabelkeys-to-podaffinity#user-stories-optional
