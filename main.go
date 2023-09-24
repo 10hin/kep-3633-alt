@@ -75,47 +75,28 @@ func health(resp http.ResponseWriter, req *http.Request) {
 }
 
 func mutate(resp http.ResponseWriter, req *http.Request) {
+	var err error
+
 	if req.Method != http.MethodPost {
 		resp.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
-	bodyBytes, err := io.ReadAll(req.Body)
-	if err != nil {
-		panic(handleClientError(resp, err, "invalid request: failed to read body"))
+	reqReview, clientErr, serverErr, errorMsg := validateExtractRequestReview(req.Body)
+	if clientErr != nil {
+		panic(handleClientError(resp, clientErr, errorMsg))
 	}
-
-	reqReview := &admissionv1.AdmissionReview{}
-	err = json.Unmarshal(bodyBytes, reqReview)
-	if err != nil {
-		panic(handleClientError(resp, err, "invalid request: failed to unmarshal request body"))
+	if serverErr != nil {
+		panic(handleServerError(resp, serverErr, errorMsg))
 	}
 
 	reviewRequest := reqReview.Request
-	if reviewRequest == nil {
-		err = fmt.Errorf("request does not contain \"request\" field")
-		panic(handleClientError(resp, err, ""))
+	reqObject, clientErr, serverErr, errorMsg := validateExtractRequestPod(reviewRequest)
+	if clientErr != nil {
+		panic(handleClientError(resp, clientErr, errorMsg))
 	}
-
-	if reviewRequest.Operation != admissionv1.Create {
-		err = fmt.Errorf("handle CREATE operation only")
-		panic(handleClientError(resp, err, ""))
-	}
-
-	if reviewRequest.Resource != podsv1GVR {
-		err = fmt.Errorf("accept only core/v1/pods")
-		panic(handleClientError(resp, err, ""))
-	}
-
-	if reviewRequest.SubResource != "" {
-		err = fmt.Errorf("accept only core/v1/pods itself, not subresources")
-		panic(handleClientError(resp, err, ""))
-	}
-
-	reqObject := &corev1.Pod{}
-	err = json.Unmarshal(reviewRequest.Object.Raw, reqObject)
-	if err != nil {
-		panic(handleClientError(resp, err, "failed to unmarshal request.object as core/v1/pods"))
+	if serverErr != nil {
+		panic(handleServerError(resp, serverErr, errorMsg))
 	}
 
 	labels := reqObject.GetLabels()
@@ -325,6 +306,52 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 
 	sendResponse(resp, respReview)
 
+}
+
+func validateExtractRequestReview(reqBody io.Reader) (reqReview *admissionv1.AdmissionReview, clientErr, serverErr error, errorMessage string) {
+	bodyBytes, err := io.ReadAll(reqBody)
+	if err != nil {
+		return nil, nil, err, "invalid request: failed to read body"
+	}
+
+	reqReview = &admissionv1.AdmissionReview{}
+	err = json.Unmarshal(bodyBytes, reqReview)
+	if err != nil {
+		return nil, err, nil, "invalid request: failed to unmarshal request body"
+	}
+
+	reviewRequest := reqReview.Request
+	if reviewRequest == nil {
+		err = fmt.Errorf("request does not contain \"request\" field")
+		return nil, err, nil, ""
+	}
+
+	if reviewRequest.Operation != admissionv1.Create {
+		err = fmt.Errorf("handle CREATE operation only")
+		return nil, err, nil, ""
+	}
+
+	if reviewRequest.Resource != podsv1GVR {
+		err = fmt.Errorf("accept only core/v1/pods")
+		return nil, err, nil, ""
+	}
+
+	if reviewRequest.SubResource != "" {
+		err = fmt.Errorf("accept only core/v1/pods itself, not subresources")
+		return nil, err, nil, ""
+	}
+
+	return reqReview, nil, nil, ""
+}
+
+func validateExtractRequestPod(reviewRequest *admissionv1.AdmissionRequest) (reqPod *corev1.Pod, clientErr, serverErr error, errorMessage string) {
+	reqObject := &corev1.Pod{}
+	clientErr = json.Unmarshal(reviewRequest.Object.Raw, reqObject)
+	if clientErr != nil {
+		return nil, clientErr, nil, "failed to unmarshal request.object as core/v1/pods"
+	}
+
+	return reqObject, nil, nil, ""
 }
 
 func createHardAffinitiesAppending(source string, labels map[string]string) ([]corev1.PodAffinityTerm, error) {
