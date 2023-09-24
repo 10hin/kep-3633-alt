@@ -14,10 +14,10 @@ So, I implement this according to [KEP][original-kep-referencing].
 ## Roadmap and statuses
 
 - [X] Implement webhook
-    - [X] append `.spec.affinity.podAffinity.required...duling`
-    - [X] append `.spec.affinity.podAffinity.preferred...duling`
-    - [X] append `.spec.affinity.podAntiAffinity.required...duling`
-    - [X] append `.spec.affinity.podAntiAffinity.preferred...duling`
+    - [X] append `.spec.affinity.podAffinity.required...Execution`
+    - [X] append `.spec.affinity.podAffinity.preferred...Execution`
+    - [X] append `.spec.affinity.podAntiAffinity.required...Execution`
+    - [X] append `.spec.affinity.podAntiAffinity.preferred...Execution`
 - [X] Build and publish container image
     - published to `ghcr.io/10hin/kep3633alt:latest`
 - [ ] Write installation manifest
