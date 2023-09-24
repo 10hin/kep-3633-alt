@@ -77,10 +77,16 @@ func health(resp http.ResponseWriter, req *http.Request) {
 func mutate(resp http.ResponseWriter, req *http.Request) {
 	var err error
 
+	// HTTP request method validation
 	if req.Method != http.MethodPost {
 		resp.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+
+	// Application level request content validation and parsing
+
+	// cluster admin level (i.e. webhook configuration level) validation and input extraction
+	// When error found, response with error (4xx or 5xx)
 
 	reqReview, clientErr, serverErr, errorMsg := validateExtractRequestReview(req.Body)
 	if clientErr != nil {
@@ -99,21 +105,18 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 		panic(handleServerError(resp, serverErr, errorMsg))
 	}
 
+	// cluster user level (i.e. request manifest level) validation and input extraction
+	// When error found, response with OK (200), but notify error without HTTP response.
+	// (for example: annotate pod with error message)
+
 	labels := reqObject.GetLabels()
 	annotations := reqObject.GetAnnotations()
 
-	var hardAffinitiesAppending []corev1.PodAffinityTerm
-	var softAffinitiesAppending []corev1.WeightedPodAffinityTerm
-	var hardAntiAffinitiesAppending []corev1.PodAffinityTerm
-	var softAntiAffinitiesAppending []corev1.WeightedPodAffinityTerm
-
 	needPatch := false
-	var hardPodAffinitySource string
-	var softPodAffinitySource string
-	var hardPodAntiAffinitySource string
-	var softPodAntiAffinitySource string
 	var exists bool
-	hardPodAffinitySource, exists = annotations[annotationKeyPodAffinityHard]
+
+	hardPodAffinitySource, exists := annotations[annotationKeyPodAffinityHard]
+	var hardAffinitiesAppending []corev1.PodAffinityTerm
 	if exists {
 		needPatch = true
 		hardAffinitiesAppending, err = createHardAffinitiesAppending(hardPodAffinitySource, labels)
@@ -122,8 +125,12 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 			log.Printf("failed to create PodAffinityTerm: %#v", err)
 			return
 		}
+	} else {
+		hardAffinitiesAppending = make([]corev1.PodAffinityTerm, 0, 0)
 	}
-	softPodAffinitySource, exists = annotations[annotationKeyPodAffinitySoft]
+
+	var softAffinitiesAppending []corev1.WeightedPodAffinityTerm
+	softPodAffinitySource, exists := annotations[annotationKeyPodAffinitySoft]
 	if exists {
 		needPatch = true
 		softAffinitiesAppending, err = createSoftAffinitiesAppending(softPodAffinitySource, labels)
@@ -132,8 +139,12 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 			log.Printf("failed to create WeightedPodAffinityTerm: %#v", err)
 			return
 		}
+	} else {
+		softAffinitiesAppending = make([]corev1.WeightedPodAffinityTerm, 0, 0)
 	}
-	hardPodAntiAffinitySource, exists = annotations[annotationKeyPodAntiAffinityHard]
+
+	var hardAntiAffinitiesAppending []corev1.PodAffinityTerm
+	hardPodAntiAffinitySource, exists := annotations[annotationKeyPodAntiAffinityHard]
 	if exists {
 		needPatch = true
 		hardAntiAffinitiesAppending, err = createHardAffinitiesAppending(hardPodAntiAffinitySource, labels)
@@ -142,8 +153,12 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 			log.Printf("failed to create PodAffinityTerm: %#v", err)
 			return
 		}
+	} else {
+		hardAntiAffinitiesAppending = make([]corev1.PodAffinityTerm, 0, 0)
 	}
-	softPodAntiAffinitySource, exists = annotations[annotationKeyPodAntiAffinitySoft]
+
+	var softAntiAffinitiesAppending []corev1.WeightedPodAffinityTerm
+	softPodAntiAffinitySource, exists := annotations[annotationKeyPodAntiAffinitySoft]
 	if exists {
 		needPatch = true
 		softAntiAffinitiesAppending, err = createSoftAffinitiesAppending(softPodAntiAffinitySource, labels)
@@ -152,7 +167,11 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 			log.Printf("failed to create WeightedPodAffinityTerm: %#v", err)
 			return
 		}
+	} else {
+		softAntiAffinitiesAppending = make([]corev1.WeightedPodAffinityTerm, 0, 0)
 	}
+
+	// create response content
 
 	respReview := admissionv1.AdmissionReview{
 		TypeMeta: metav1.TypeMeta{
@@ -164,147 +183,33 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 			UID:     reviewRequest.UID,
 		},
 	}
-	sendResponse := func(resp http.ResponseWriter, respReview admissionv1.AdmissionReview) {
-		var respBytes []byte
-		respBytes, err = json.Marshal(respReview)
+
+	if needPatch {
+		patch := createJSONPatch(reqObject, hardAffinitiesAppending, softAffinitiesAppending, hardAntiAffinitiesAppending, softAntiAffinitiesAppending)
+
+		var patchBytes []byte
+		patchBytes, err = json.Marshal(patch)
 		if err != nil {
 			// TODO: return 500
 		}
 
-		resp.WriteHeader(http.StatusOK)
-		_, err = resp.Write(respBytes)
-		if err != nil {
-			log.Printf("failed to write response: %#v", err)
-		}
+		respReview.Response.PatchType = &patchTypeJSONPatch
+		respReview.Response.Patch = patchBytes
 	}
 
-	if !needPatch {
-		sendResponse(resp, respReview)
-		return
-	}
-
-	patch := make([]map[string]interface{}, 0)
-
-	var affinityField = reqObject.Spec.Affinity
-	var podAffinityField *corev1.PodAffinity
-	var podHardAffinityField []corev1.PodAffinityTerm
-	var podSoftAffinityField []corev1.WeightedPodAffinityTerm
-	var podAntiAffinityField *corev1.PodAntiAffinity
-	var podHardAntiAffinityField []corev1.PodAffinityTerm
-	var podSoftAntiAffinityField []corev1.WeightedPodAffinityTerm
-	if affinityField != nil {
-		podAffinityField = affinityField.PodAffinity
-		podAntiAffinityField = affinityField.PodAntiAffinity
-	} else {
-		patch = append(patch, map[string]interface{}{
-			"op":    "add",
-			"path":  "/spec/affinity",
-			"value": map[string]interface{}{},
-		})
-	}
-	if podAffinityField != nil {
-		podHardAffinityField = podAffinityField.RequiredDuringSchedulingIgnoredDuringExecution
-		podSoftAffinityField = podAffinityField.PreferredDuringSchedulingIgnoredDuringExecution
-	} else {
-		patch = append(patch, map[string]interface{}{
-			"op":    "add",
-			"path":  "/spec/affinity/podAffinity",
-			"value": map[string]interface{}{},
-		})
-	}
-	if podAntiAffinityField != nil {
-		podHardAntiAffinityField = podAntiAffinityField.RequiredDuringSchedulingIgnoredDuringExecution
-		podSoftAntiAffinityField = podAntiAffinityField.PreferredDuringSchedulingIgnoredDuringExecution
-	} else {
-		patch = append(patch, map[string]interface{}{
-			"op":    "add",
-			"path":  "/spec/affinity/podAntiAffinity",
-			"value": map[string]interface{}{},
-		})
-	}
-
-	if hardAffinitiesAppending != nil && len(hardAffinitiesAppending) > 0 {
-		if podHardAffinityField == nil {
-			patch = append(patch, map[string]interface{}{
-				"op":    "add",
-				"path":  "/spec/affinity/podAffinity/requiredDuringSchedulingIgnoredDuringExecution",
-				"value": hardAffinitiesAppending,
-			})
-		} else {
-			for _, a := range hardAffinitiesAppending {
-				patch = append(patch, map[string]interface{}{
-					"op":    "add",
-					"path":  "/spec/affinity/podAffinity/requiredDuringSchedulingIgnoredDuringExecution/-",
-					"value": a,
-				})
-			}
-		}
-	}
-
-	if softAffinitiesAppending != nil && len(softAffinitiesAppending) > 0 {
-		if podSoftAffinityField == nil {
-			patch = append(patch, map[string]interface{}{
-				"op":    "add",
-				"path":  "/spec/affinity/podAffinity/preferredDuringSchedulingIgnoredDuringExecution",
-				"value": softAffinitiesAppending,
-			})
-		} else {
-			for _, a := range softAffinitiesAppending {
-				patch = append(patch, map[string]interface{}{
-					"op":    "add",
-					"path":  "/spec/affinity/podAffinity/preferredDuringSchedulingIgnoredDuringExecution/-",
-					"value": a,
-				})
-			}
-		}
-	}
-
-	if hardAntiAffinitiesAppending != nil && len(hardAntiAffinitiesAppending) > 0 {
-		if podHardAntiAffinityField == nil {
-			patch = append(patch, map[string]interface{}{
-				"op":    "add",
-				"path":  "/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution",
-				"value": hardAffinitiesAppending,
-			})
-		} else {
-			for _, a := range hardAntiAffinitiesAppending {
-				patch = append(patch, map[string]interface{}{
-					"op":    "add",
-					"path":  "/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution/-",
-					"value": a,
-				})
-			}
-		}
-	}
-
-	if softAntiAffinitiesAppending != nil && len(softAntiAffinitiesAppending) > 0 {
-		if podSoftAntiAffinityField == nil {
-			patch = append(patch, map[string]interface{}{
-				"op":    "add",
-				"path":  "/spec/affinity/podAntiAffinity/preferredDuringSchedulingIgnoredDuringExecution",
-				"value": softAntiAffinitiesAppending,
-			})
-		} else {
-			for _, a := range softAntiAffinitiesAppending {
-				patch = append(patch, map[string]interface{}{
-					"op":    "add",
-					"path":  "/spec/affinity/podAntiAffinity/preferredDuringSchedulingIgnoredDuringExecution/-",
-					"value": a,
-				})
-			}
-		}
-	}
-
-	var patchBytes []byte
-	patchBytes, err = json.Marshal(patch)
+	var respBytes []byte
+	respBytes, err = json.Marshal(respReview)
 	if err != nil {
 		// TODO: return 500
 	}
 
-	respReview.Response.PatchType = &patchTypeJSONPatch
-	respReview.Response.Patch = patchBytes
+	// do response
 
-	sendResponse(resp, respReview)
+	resp.WriteHeader(http.StatusOK)
+	_, err = resp.Write(respBytes)
+	if err != nil {
+		log.Printf("failed to write response: %#v", err)
+	}
 
 }
 
@@ -463,6 +368,144 @@ func mismatchLabelKeyToRequirement(matchLabelKey string, labels map[string]strin
 		// })
 		return nil
 	}
+}
+
+func createJSONPatch(reqObject *corev1.Pod, hardAffinitiesAppending []corev1.PodAffinityTerm, softAffinitiesAppending []corev1.WeightedPodAffinityTerm, hardAntiAffinitiesAppending []corev1.PodAffinityTerm, softAntiAffinitiesAppending []corev1.WeightedPodAffinityTerm) (patch []map[string]interface{}) {
+
+	hardAffinitiesNeeded := hardAffinitiesAppending != nil && len(hardAffinitiesAppending) > 0
+	softAffinitiesNeeded := softAffinitiesAppending != nil && len(softAffinitiesAppending) > 0
+	hardAntiAffinitiesNeeded := hardAntiAffinitiesAppending != nil && len(hardAntiAffinitiesAppending) > 0
+	softAntiAffinitiesNeeded := softAntiAffinitiesAppending != nil && len(softAntiAffinitiesAppending) > 0
+
+	podAffinitiesNeeded := hardAffinitiesNeeded || softAffinitiesNeeded
+	podAntiAffinitiesNeeded := hardAntiAffinitiesNeeded || softAntiAffinitiesNeeded
+
+	affinitiesNeeded := podAffinitiesNeeded || podAntiAffinitiesNeeded
+
+	patch = make([]map[string]interface{}, 0)
+
+	var affinityField = reqObject.Spec.Affinity
+	var podAffinityField *corev1.PodAffinity
+	var podHardAffinityField []corev1.PodAffinityTerm
+	var podSoftAffinityField []corev1.WeightedPodAffinityTerm
+	var podAntiAffinityField *corev1.PodAntiAffinity
+	var podHardAntiAffinityField []corev1.PodAffinityTerm
+	var podSoftAntiAffinityField []corev1.WeightedPodAffinityTerm
+
+	if affinitiesNeeded {
+		if affinityField != nil {
+			podAffinityField = affinityField.PodAffinity
+			podAntiAffinityField = affinityField.PodAntiAffinity
+		} else {
+			patch = append(patch, map[string]interface{}{
+				"op":    "add",
+				"path":  "/spec/affinity",
+				"value": map[string]interface{}{},
+			})
+		}
+	}
+
+	if podAffinitiesNeeded {
+		if podAffinityField != nil {
+			podHardAffinityField = podAffinityField.RequiredDuringSchedulingIgnoredDuringExecution
+			podSoftAffinityField = podAffinityField.PreferredDuringSchedulingIgnoredDuringExecution
+		} else {
+			patch = append(patch, map[string]interface{}{
+				"op":    "add",
+				"path":  "/spec/affinity/podAffinity",
+				"value": map[string]interface{}{},
+			})
+		}
+	}
+
+	if podAntiAffinitiesNeeded {
+		if podAntiAffinityField != nil {
+			podHardAntiAffinityField = podAntiAffinityField.RequiredDuringSchedulingIgnoredDuringExecution
+			podSoftAntiAffinityField = podAntiAffinityField.PreferredDuringSchedulingIgnoredDuringExecution
+		} else {
+			patch = append(patch, map[string]interface{}{
+				"op":    "add",
+				"path":  "/spec/affinity/podAntiAffinity",
+				"value": map[string]interface{}{},
+			})
+		}
+	}
+
+	if hardAffinitiesNeeded {
+		if hardAffinitiesAppending != nil {
+			if podHardAffinityField == nil {
+				patch = append(patch, map[string]interface{}{
+					"op":    "add",
+					"path":  "/spec/affinity/podAffinity/requiredDuringSchedulingIgnoredDuringExecution",
+					"value": hardAffinitiesAppending,
+				})
+			} else {
+				for _, a := range hardAffinitiesAppending {
+					patch = append(patch, map[string]interface{}{
+						"op":    "add",
+						"path":  "/spec/affinity/podAffinity/requiredDuringSchedulingIgnoredDuringExecution/-",
+						"value": a,
+					})
+				}
+			}
+		}
+	}
+
+	if softAffinitiesNeeded {
+		if podSoftAffinityField == nil {
+			patch = append(patch, map[string]interface{}{
+				"op":    "add",
+				"path":  "/spec/affinity/podAffinity/preferredDuringSchedulingIgnoredDuringExecution",
+				"value": softAffinitiesAppending,
+			})
+		} else {
+			for _, a := range softAffinitiesAppending {
+				patch = append(patch, map[string]interface{}{
+					"op":    "add",
+					"path":  "/spec/affinity/podAffinity/preferredDuringSchedulingIgnoredDuringExecution/-",
+					"value": a,
+				})
+			}
+		}
+	}
+
+	if hardAntiAffinitiesNeeded {
+		if podHardAntiAffinityField == nil {
+			patch = append(patch, map[string]interface{}{
+				"op":    "add",
+				"path":  "/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution",
+				"value": hardAffinitiesAppending,
+			})
+		} else {
+			for _, a := range hardAntiAffinitiesAppending {
+				patch = append(patch, map[string]interface{}{
+					"op":    "add",
+					"path":  "/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution/-",
+					"value": a,
+				})
+			}
+		}
+	}
+
+	if softAntiAffinitiesNeeded {
+		if podSoftAntiAffinityField == nil {
+			patch = append(patch, map[string]interface{}{
+				"op":    "add",
+				"path":  "/spec/affinity/podAntiAffinity/preferredDuringSchedulingIgnoredDuringExecution",
+				"value": softAntiAffinitiesAppending,
+			})
+		} else {
+			for _, a := range softAntiAffinitiesAppending {
+				patch = append(patch, map[string]interface{}{
+					"op":    "add",
+					"path":  "/spec/affinity/podAntiAffinity/preferredDuringSchedulingIgnoredDuringExecution/-",
+					"value": a,
+				})
+			}
+		}
+	}
+
+	return patch
 }
 
 func handleClientError(resp http.ResponseWriter, respError error, msg string) error {
