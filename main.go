@@ -16,12 +16,13 @@ import (
 )
 
 const (
-	httpHeaderKeyContentType         = "content-type"
-	mimeTypeApplicationJson          = "application/json"
-	annotationKeyPodAffinitySoft     = "kep-3633-alt.10h.in/podAffinity.preferredDuringSchedulingIgnoredDuringExecution"
-	annotationKeyPodAffinityHard     = "kep-3633-alt.10h.in/podAffinity.requiredDuringSchedulingIgnoredDuringExecution"
-	annotationKeyPodAntiAffinitySoft = "kep-3633-alt.10h.in/podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution"
-	annotationKeyPodAntiAffinityHard = "kep-3633-alt.10h.in/podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution"
+	httpHeaderKeyContentType               = "content-type"
+	mimeTypeApplicationJson                = "application/json"
+	annotationKeyPodAffinitySoft           = "kep-3633-alt.10h.in/podAffinity.preferredDuringSchedulingIgnoredDuringExecution"
+	annotationKeyPodAffinityHard           = "kep-3633-alt.10h.in/podAffinity.requiredDuringSchedulingIgnoredDuringExecution"
+	annotationKeyPodAntiAffinitySoft       = "kep-3633-alt.10h.in/podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution"
+	annotationKeyPodAntiAffinityHard       = "kep-3633-alt.10h.in/podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution"
+	annotationKeyTopologySpreadConstraints = "kep-3633-alt.10h.in/topologySpreadConstraints"
 )
 
 var (
@@ -171,6 +172,20 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 		softAntiAffinitiesAppending = make([]corev1.WeightedPodAffinityTerm, 0, 0)
 	}
 
+	var topologySpreadConstraintsAppending []corev1.TopologySpreadConstraint
+	topologySpreadConstraintsSource, exists := annotations[annotationKeyTopologySpreadConstraints]
+	if exists {
+		needPatch = true
+		topologySpreadConstraintsAppending, err = createTopologySpreadConstraintsAppending(topologySpreadConstraintsSource, labels)
+		if err != nil {
+			// TODO: annotate pod with error message or publish events
+			log.Printf("failed to create TopologySpreadConstraint: %#V", err)
+			return
+		}
+	} else {
+		topologySpreadConstraintsAppending = make([]corev1.TopologySpreadConstraint, 0, 0)
+	}
+
 	// create response content
 
 	respReview := admissionv1.AdmissionReview{
@@ -185,7 +200,9 @@ func mutate(resp http.ResponseWriter, req *http.Request) {
 	}
 
 	if needPatch {
-		patch := createJSONPatch(reqObject, hardAffinitiesAppending, softAffinitiesAppending, hardAntiAffinitiesAppending, softAntiAffinitiesAppending)
+		podAffinityPatch := createAffinityJSONPatch(reqObject, hardAffinitiesAppending, softAffinitiesAppending, hardAntiAffinitiesAppending, softAntiAffinitiesAppending)
+		topologySpreadPatch := createTopologySpreadConstraintsJSONPatch(reqObject, topologySpreadConstraintsAppending)
+		patch := append(podAffinityPatch, topologySpreadPatch...)
 
 		var patchBytes []byte
 		patchBytes, err = json.Marshal(patch)
@@ -332,6 +349,37 @@ func createSoftAffinitiesAppending(source string, labels map[string]string) ([]c
 	return softAffinitiesAppending, nil
 }
 
+func createTopologySpreadConstraintsAppending(source string, labels map[string]string) ([]corev1.TopologySpreadConstraint, error) {
+	var constraints []corev1.TopologySpreadConstraint
+	err := json.Unmarshal(([]byte)(source), &constraints)
+	if err != nil {
+		return nil, err
+	}
+
+	constraintsAppending := make([]corev1.TopologySpreadConstraint, 0, len(constraints))
+	for _, constraint := range constraints {
+		constraintAppending := *constraint.DeepCopy()
+		constraintAppending.MatchLabelKeys = nil
+		labelSelector := constraintAppending.LabelSelector
+		if labelSelector == nil {
+			labelSelector = &metav1.LabelSelector{}
+			constraintAppending.LabelSelector = labelSelector
+		}
+		matchExp := labelSelector.MatchExpressions
+		if matchExp == nil {
+			matchExp = make([]metav1.LabelSelectorRequirement, 0, len(constraint.MatchLabelKeys))
+		}
+		for _, matchLabelKey := range constraint.MatchLabelKeys {
+			requirement := matchLabelKeyToRequirement(matchLabelKey, labels)
+			if requirement != nil {
+				matchExp = append(matchExp, *requirement)
+			}
+		}
+		constraintsAppending = append(constraintsAppending, constraintAppending)
+	}
+	return constraintsAppending, nil
+}
+
 func matchLabelKeyToRequirement(matchLabelKey string, labels map[string]string) *metav1.LabelSelectorRequirement {
 	v, exists := labels[matchLabelKey]
 	if exists {
@@ -370,7 +418,7 @@ func mismatchLabelKeyToRequirement(matchLabelKey string, labels map[string]strin
 	}
 }
 
-func createJSONPatch(reqObject *corev1.Pod, hardAffinitiesAppending []corev1.PodAffinityTerm, softAffinitiesAppending []corev1.WeightedPodAffinityTerm, hardAntiAffinitiesAppending []corev1.PodAffinityTerm, softAntiAffinitiesAppending []corev1.WeightedPodAffinityTerm) (patch []map[string]interface{}) {
+func createAffinityJSONPatch(reqObject *corev1.Pod, hardAffinitiesAppending []corev1.PodAffinityTerm, softAffinitiesAppending []corev1.WeightedPodAffinityTerm, hardAntiAffinitiesAppending []corev1.PodAffinityTerm, softAntiAffinitiesAppending []corev1.WeightedPodAffinityTerm) (patch []map[string]interface{}) {
 
 	hardAffinitiesNeeded := hardAffinitiesAppending != nil && len(hardAffinitiesAppending) > 0
 	softAffinitiesNeeded := softAffinitiesAppending != nil && len(softAffinitiesAppending) > 0
@@ -499,6 +547,31 @@ func createJSONPatch(reqObject *corev1.Pod, hardAffinitiesAppending []corev1.Pod
 				patch = append(patch, map[string]interface{}{
 					"op":    "add",
 					"path":  "/spec/affinity/podAntiAffinity/preferredDuringSchedulingIgnoredDuringExecution/-",
+					"value": a,
+				})
+			}
+		}
+	}
+
+	return patch
+}
+
+func createTopologySpreadConstraintsJSONPatch(reqObject *corev1.Pod, constraintsAppending []corev1.TopologySpreadConstraint) []map[string]interface{} {
+	patch := make([]map[string]interface{}, 0, 0)
+
+	var topologySpreadConstraintsField = reqObject.Spec.TopologySpreadConstraints
+	if len(constraintsAppending) > 0 {
+		if topologySpreadConstraintsField == nil {
+			patch = append(patch, map[string]interface{}{
+				"op":    "add",
+				"path":  "/spec/topologySpreadConstraints",
+				"value": constraintsAppending,
+			})
+		} else {
+			for _, a := range constraintsAppending {
+				patch = append(patch, map[string]interface{}{
+					"op":    "add",
+					"path":  "/spec/topologySpreadConstraints/-",
 					"value": a,
 				})
 			}
