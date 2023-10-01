@@ -522,7 +522,7 @@ func createAffinityJSONPatch(reqObject *corev1.Pod, hardAffinitiesAppending []co
 			patch = append(patch, map[string]interface{}{
 				"op":    "add",
 				"path":  "/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution",
-				"value": hardAffinitiesAppending,
+				"value": hardAntiAffinitiesAppending,
 			})
 		} else {
 			for _, a := range hardAntiAffinitiesAppending {
