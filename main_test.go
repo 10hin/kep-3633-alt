@@ -11,149 +11,302 @@ import (
 )
 
 const (
-	jsonpatchKeyOperation      = "op"
-	jsonpatchKeyPath           = "path"
-	jsonpatchKeyValue          = "value"
-	jsonpatchOperationValueAdd = "add"
+	// testScaleIndex = 1 for normal tests. testScaleIndex = 2 make tests heavy.
+	testScaleIndex = 1
 )
 
-func TestCreateAffinityJSONPatch_addNewHardAffinity(t *testing.T) {
-	pod := prepareBasicPod()
-	hardAffinitiesAppending := []corev1.PodAffinityTerm{
-		{
-			LabelSelector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app": "nginx",
-				},
-			},
-			TopologyKey: "topology.kubernetes.io/zone",
-		},
-	}
-	softAffinitiesAppending := make([]corev1.WeightedPodAffinityTerm, 0, 0)
-	hardAntiAffinitiesAppending := make([]corev1.PodAffinityTerm, 0, 0)
-	softAntiAffinitiesAppending := make([]corev1.WeightedPodAffinityTerm, 0, 0)
-	patches := createAffinityJSONPatch(pod, hardAffinitiesAppending, softAffinitiesAppending, hardAntiAffinitiesAppending, softAntiAffinitiesAppending)
-	fmt.Println(patches)
-
-	patchedPod, err := applyPatch(pod, patches)
-	if err != nil {
-		t.Error("failed to patch pod with created JSONPatch", err)
-	}
-
-	// assertions
-	if !hardAffinityFieldNonNil(patchedPod) {
-		t.Error("/spec/affinity/podAffinity/requiredDuringSchedulingIgnoredDuringExecution field not found")
-	}
-	hardAffinityLen := len(patchedPod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
-	if hardAffinityLen != len(hardAffinitiesAppending) {
-		t.Errorf("unexpected pod affinity size: expected: %d, actual: %d", len(hardAffinitiesAppending), hardAffinityLen)
-	}
+type testCreateAffinityJSONPatchCase struct {
+	BeforeHardAffinities        []corev1.PodAffinityTerm
+	BeforeSoftAffinities        []corev1.WeightedPodAffinityTerm
+	BeforeHardAntiAffinities    []corev1.PodAffinityTerm
+	BeforeSoftAntiAffinities    []corev1.WeightedPodAffinityTerm
+	HardAffinitiesAppending     []corev1.PodAffinityTerm
+	SoftAffinitiesAppending     []corev1.WeightedPodAffinityTerm
+	HardAntiAffinitiesAppending []corev1.PodAffinityTerm
+	SoftAntiAffinitiesAppending []corev1.WeightedPodAffinityTerm
 }
 
-func TestCreateAffinityJSONPatch_addNewSoftAffinity(t *testing.T) {
-	pod := prepareBasicPod()
-	hardAffinitiesAppending := make([]corev1.PodAffinityTerm, 0, 0)
-	softAffinitiesAppending := []corev1.WeightedPodAffinityTerm{
-		{
-			Weight: 50,
-			PodAffinityTerm: corev1.PodAffinityTerm{
+func TestCreateAffinityJSONPatch(t *testing.T) {
+	testCases := make([]testCreateAffinityJSONPatchCase, 0, 1<<16)
+	for bits := 0; bits < (1 << (8 * testScaleIndex)); bits++ {
+		var size int
+		testCase := testCreateAffinityJSONPatchCase{}
+
+		mask := (1 << (testScaleIndex + 1)) - 1
+		size = (bits >> (0 * testScaleIndex)) & mask
+		testCase.BeforeHardAffinities = make([]corev1.PodAffinityTerm, size, size)
+		for idx := 0; idx < size; idx++ {
+			testCase.BeforeHardAffinities[idx] = corev1.PodAffinityTerm{
 				LabelSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"app": "nginx",
 					},
 				},
-				TopologyKey: "topology.kubernetes.io/zone",
-			},
-		},
-	}
-	hardAntiAffinitiesAppending := make([]corev1.PodAffinityTerm, 0, 0)
-	softAntiAffinitiesAppending := make([]corev1.WeightedPodAffinityTerm, 0, 0)
-	patches := createAffinityJSONPatch(pod, hardAffinitiesAppending, softAffinitiesAppending, hardAntiAffinitiesAppending, softAntiAffinitiesAppending)
-
-	patchedPod, err := applyPatch(pod, patches)
-	if err != nil {
-		t.Error("failed to patch pod with created JSONPatch", err)
-	}
-
-	// assertions
-	if !softAffinityFieldNonNil(patchedPod) {
-		t.Error("/spec/affinity/podAffinity/preferredDuringSchedulingIgnoredDuringExecution field not found")
-	}
-	softAffinityLen := len(patchedPod.Spec.Affinity.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution)
-	if softAffinityLen != len(softAffinitiesAppending) {
-		t.Errorf("unexpected pod affinity size: expected: %d, actual: %d", len(softAffinitiesAppending), softAffinityLen)
-	}
-}
-
-func TestCreateAffinityJSONPatch_addNewHardAntiAffinity(t *testing.T) {
-	pod := prepareBasicPod()
-	hardAffinitiesAppending := make([]corev1.PodAffinityTerm, 0, 0)
-	softAffinitiesAppending := make([]corev1.WeightedPodAffinityTerm, 0, 0)
-	hardAntiAffinitiesAppending := []corev1.PodAffinityTerm{
-		{
-			LabelSelector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app": "nginx",
+				TopologyKey: fmt.Sprintf("topology.kubernetes.io/host%d", idx),
+			}
+		}
+		size = (bits >> (1 * testScaleIndex)) & mask
+		testCase.BeforeSoftAffinities = make([]corev1.WeightedPodAffinityTerm, size, size)
+		for idx := 0; idx < size; idx++ {
+			testCase.BeforeSoftAffinities[idx] = corev1.WeightedPodAffinityTerm{
+				Weight: 50,
+				PodAffinityTerm: corev1.PodAffinityTerm{
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"app": "nginx",
+						},
+					},
+					TopologyKey: fmt.Sprintf("topology.kubernetes.io/host%d", idx),
 				},
-			},
-			TopologyKey: "topology.kubernetes.io/zone",
-		},
-	}
-	softAntiAffinitiesAppending := make([]corev1.WeightedPodAffinityTerm, 0, 0)
-	patches := createAffinityJSONPatch(pod, hardAffinitiesAppending, softAffinitiesAppending, hardAntiAffinitiesAppending, softAntiAffinitiesAppending)
-	fmt.Println(patches)
-
-	patchedPod, err := applyPatch(pod, patches)
-	if err != nil {
-		t.Error("failed to patch pod with created JSONPatch", err)
-	}
-
-	// assertions
-	if !hardAntiAffinityFieldNonNil(patchedPod) {
-		t.Error("/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution field not found")
-	}
-	hardAntiAffinityLen := len(patchedPod.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
-	if hardAntiAffinityLen != len(hardAntiAffinitiesAppending) {
-		t.Errorf("unexpected pod affinity size: expected: %d, actual: %d", len(hardAntiAffinitiesAppending), hardAntiAffinityLen)
-	}
-}
-
-func TestCreateAffinityJSONPatch_addNewSoftAntiAffinity(t *testing.T) {
-	pod := prepareBasicPod()
-	hardAffinitiesAppending := make([]corev1.PodAffinityTerm, 0, 0)
-	softAffinitiesAppending := make([]corev1.WeightedPodAffinityTerm, 0, 0)
-	hardAntiAffinitiesAppending := make([]corev1.PodAffinityTerm, 0, 0)
-	softAntiAffinitiesAppending := []corev1.WeightedPodAffinityTerm{
-		{
-			Weight: 50,
-			PodAffinityTerm: corev1.PodAffinityTerm{
+			}
+		}
+		size = (bits >> (2 * testScaleIndex)) & mask
+		testCase.BeforeHardAntiAffinities = make([]corev1.PodAffinityTerm, size, size)
+		for idx := 0; idx < size; idx++ {
+			testCase.BeforeHardAntiAffinities[idx] = corev1.PodAffinityTerm{
 				LabelSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"app": "nginx",
 					},
 				},
-				TopologyKey: "topology.kubernetes.io/zone",
-			},
-		},
+				TopologyKey: fmt.Sprintf("topology.kubernetes.io/host%d", idx),
+			}
+		}
+		size = (bits >> (3 * testScaleIndex)) & mask
+		testCase.BeforeSoftAntiAffinities = make([]corev1.WeightedPodAffinityTerm, size, size)
+		for idx := 0; idx < size; idx++ {
+			testCase.BeforeSoftAntiAffinities[idx] = corev1.WeightedPodAffinityTerm{
+				Weight: 50,
+				PodAffinityTerm: corev1.PodAffinityTerm{
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"app": "nginx",
+						},
+					},
+					TopologyKey: fmt.Sprintf("topology.kubernetes.io/host%d", idx),
+				},
+			}
+		}
+		size = (bits >> (4 * testScaleIndex)) & mask
+		testCase.HardAffinitiesAppending = make([]corev1.PodAffinityTerm, size, size)
+		for idx := 0; idx < size; idx++ {
+			testCase.HardAffinitiesAppending[idx] = corev1.PodAffinityTerm{
+				LabelSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"app": "nginx",
+					},
+				},
+				TopologyKey: fmt.Sprintf("topology.kubernetes.io/zone%d", idx),
+			}
+		}
+		size = (bits >> (5 * testScaleIndex)) & mask
+		testCase.SoftAffinitiesAppending = make([]corev1.WeightedPodAffinityTerm, size, size)
+		for idx := 0; idx < size; idx++ {
+			testCase.SoftAffinitiesAppending[idx] = corev1.WeightedPodAffinityTerm{
+				Weight: 50,
+				PodAffinityTerm: corev1.PodAffinityTerm{
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"app": "nginx",
+						},
+					},
+					TopologyKey: fmt.Sprintf("topology.kubernetes.io/zone%d", idx),
+				},
+			}
+		}
+		size = (bits >> (6 * testScaleIndex)) & mask
+		testCase.HardAntiAffinitiesAppending = make([]corev1.PodAffinityTerm, size, size)
+		for idx := 0; idx < size; idx++ {
+			testCase.HardAntiAffinitiesAppending[idx] = corev1.PodAffinityTerm{
+				LabelSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"app": "nginx",
+					},
+				},
+				TopologyKey: fmt.Sprintf("topology.kubernetes.io/zone%d", idx),
+			}
+		}
+		size = (bits >> (7 * testScaleIndex)) & mask
+		testCase.SoftAntiAffinitiesAppending = make([]corev1.WeightedPodAffinityTerm, size, size)
+		for idx := 0; idx < size; idx++ {
+			testCase.SoftAntiAffinitiesAppending[idx] = corev1.WeightedPodAffinityTerm{
+				Weight: 50,
+				PodAffinityTerm: corev1.PodAffinityTerm{
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"app": "nginx",
+						},
+					},
+					TopologyKey: fmt.Sprintf("topology.kubernetes.io/zone%d", idx),
+				},
+			}
+		}
+		testCases = append(testCases, testCase)
 	}
-	patches := createAffinityJSONPatch(pod, hardAffinitiesAppending, softAffinitiesAppending, hardAntiAffinitiesAppending, softAntiAffinitiesAppending)
 
-	patchedPod, err := applyPatch(pod, patches)
-	if err != nil {
-		t.Error("failed to patch pod with created JSONPatch", err)
-	}
+	for _, testCase := range testCases {
+		pod := prepareBasicPod()
+		if len(testCase.BeforeHardAffinities) > 0 {
+			if pod.Spec.Affinity == nil {
+				pod.Spec.Affinity = &corev1.Affinity{}
+			}
+			if pod.Spec.Affinity.PodAffinity == nil {
+				pod.Spec.Affinity.PodAffinity = &corev1.PodAffinity{}
+			}
+			pod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution = testCase.BeforeHardAffinities
+		}
+		if len(testCase.BeforeSoftAffinities) > 0 {
+			if pod.Spec.Affinity == nil {
+				pod.Spec.Affinity = &corev1.Affinity{}
+			}
+			if pod.Spec.Affinity.PodAffinity == nil {
+				pod.Spec.Affinity.PodAffinity = &corev1.PodAffinity{}
+			}
+			pod.Spec.Affinity.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution = testCase.BeforeSoftAffinities
+		}
+		if len(testCase.BeforeHardAntiAffinities) > 0 {
+			if pod.Spec.Affinity == nil {
+				pod.Spec.Affinity = &corev1.Affinity{}
+			}
+			if pod.Spec.Affinity.PodAntiAffinity == nil {
+				pod.Spec.Affinity.PodAntiAffinity = &corev1.PodAntiAffinity{}
+			}
+			pod.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution = testCase.BeforeHardAntiAffinities
+		}
+		if len(testCase.BeforeSoftAntiAffinities) > 0 {
+			if pod.Spec.Affinity == nil {
+				pod.Spec.Affinity = &corev1.Affinity{}
+			}
+			if pod.Spec.Affinity.PodAntiAffinity == nil {
+				pod.Spec.Affinity.PodAntiAffinity = &corev1.PodAntiAffinity{}
+			}
+			pod.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution = testCase.BeforeSoftAntiAffinities
+		}
 
-	// assertions
-	if !softAntiAffinityFieldNonNil(patchedPod) {
-		t.Error("/spec/affinity/podAffinity/preferredDuringSchedulingIgnoredDuringExecution field not found")
-	}
-	softAntiAffinityLen := len(patchedPod.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution)
-	if softAntiAffinityLen != len(softAntiAffinitiesAppending) {
-		t.Errorf("unexpected pod affinity size: expected: %d, actual: %d", len(softAntiAffinitiesAppending), softAntiAffinityLen)
+		patches := createAffinityJSONPatch(pod, testCase.HardAffinitiesAppending, testCase.SoftAffinitiesAppending, testCase.HardAntiAffinitiesAppending, testCase.SoftAntiAffinitiesAppending)
+
+		patchedPod, err := applyPatch(pod, patches)
+		if err != nil {
+			t.Error("failed to patch pod with created JSONPatch", err)
+		}
+
+		if len(testCase.BeforeHardAffinities)+len(testCase.HardAffinitiesAppending) > 0 {
+			if !hardAffinityFieldNonNil(patchedPod) {
+				t.Error("/spec/affinity/podAffinity/requiredDuringSchedulingIgnoredDuringExecution field not found")
+			}
+			expectedLen := len(testCase.BeforeHardAffinities) + len(testCase.HardAffinitiesAppending)
+			actualLen := len(patchedPod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
+			if actualLen != expectedLen {
+				t.Errorf("unexpected pod affinity size: expected: %d, actual: %d", expectedLen, actualLen)
+			}
+		}
+		if len(testCase.BeforeSoftAffinities)+len(testCase.SoftAffinitiesAppending) > 0 {
+			if !softAffinityFieldNonNil(patchedPod) {
+				t.Error("/spec/affinity/podAffinity/preferredDuringSchedulingIgnoredDuringExecution field not found")
+			}
+			expectedLen := len(testCase.BeforeSoftAffinities) + len(testCase.SoftAffinitiesAppending)
+			actualLen := len(patchedPod.Spec.Affinity.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution)
+			if actualLen != expectedLen {
+				t.Errorf("unexpected pod affinity size: expected: %d, actual: %d", expectedLen, actualLen)
+			}
+		}
+		if len(testCase.BeforeHardAntiAffinities)+len(testCase.HardAntiAffinitiesAppending) > 0 {
+			if !hardAntiAffinityFieldNonNil(patchedPod) {
+				t.Error("/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution field not found")
+			}
+			expectedLen := len(testCase.BeforeHardAntiAffinities) + len(testCase.HardAntiAffinitiesAppending)
+			actualLen := len(patchedPod.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
+			if actualLen != expectedLen {
+				t.Errorf("unexpected pod affinity size: expected: %d, actual: %d", expectedLen, actualLen)
+			}
+		}
+		if len(testCase.BeforeSoftAntiAffinities)+len(testCase.SoftAntiAffinitiesAppending) > 0 {
+			if !softAntiAffinityFieldNonNil(patchedPod) {
+				t.Error("/spec/affinity/podAntiAffinity/preferredDuringSchedulingIgnoredDuringExecution field not found")
+			}
+			expectedLen := len(testCase.BeforeSoftAntiAffinities) + len(testCase.SoftAntiAffinitiesAppending)
+			actualLen := len(patchedPod.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution)
+			if actualLen != expectedLen {
+				t.Errorf("unexpected pod affinity size: expected: %d, actual: %d", expectedLen, actualLen)
+			}
+		}
 	}
 }
 
+type testCreateTopologySpreadConstraintsJSONPatchCase struct {
+	BeforeTopologySpreadConstraints    []corev1.TopologySpreadConstraint
+	TopologySpreadconstraintsAppending []corev1.TopologySpreadConstraint
+}
+
+func TestCreateTopologySpreadConstrainsJSONPatch(t *testing.T) {
+	testCaseSize := 1 << 4
+	testCases := make([]testCreateTopologySpreadConstraintsJSONPatchCase, testCaseSize)
+	for bits := 0; bits < testCaseSize; bits++ {
+		testCase := testCreateTopologySpreadConstraintsJSONPatchCase{}
+		var size int
+		mask := (1 << (testScaleIndex + 1)) - 1
+		size = (bits >> (0 * testScaleIndex)) & mask
+		testCase.BeforeTopologySpreadConstraints = make([]corev1.TopologySpreadConstraint, size, size)
+		for idx := 0; idx < size; idx++ {
+			testCase.BeforeTopologySpreadConstraints[idx] = corev1.TopologySpreadConstraint{
+				LabelSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"app": "nginx",
+					},
+				},
+				TopologyKey: fmt.Sprintf("topology.kubernetes.io/host%d", idx),
+				MaxSkew:     1,
+			}
+		}
+		size = (bits >> (1 * testScaleIndex)) & mask
+		testCase.TopologySpreadconstraintsAppending = make([]corev1.TopologySpreadConstraint, size, size)
+		for idx := 0; idx < size; idx++ {
+			testCase.TopologySpreadconstraintsAppending[idx] = corev1.TopologySpreadConstraint{
+				LabelSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"app": "nginx",
+					},
+				},
+				TopologyKey: fmt.Sprintf("topology.kubernetes.io/zone%d", idx),
+				MaxSkew:     1,
+			}
+		}
+		testCases = append(testCases, testCase)
+	}
+
+	for _, testCase := range testCases {
+		pod := prepareBasicPod()
+		if len(testCase.BeforeTopologySpreadConstraints) > 0 {
+			pod.Spec.TopologySpreadConstraints = testCase.BeforeTopologySpreadConstraints
+		}
+
+		patches := createTopologySpreadConstraintsJSONPatch(pod, testCase.TopologySpreadconstraintsAppending)
+
+		patchedPod, err := applyPatch(pod, patches)
+		if err != nil {
+			t.Error("failed to patch pod with created JSONPatch", err)
+		}
+
+		if len(testCase.BeforeTopologySpreadConstraints)+len(testCase.TopologySpreadconstraintsAppending) > 0 {
+			if !topologySpreadConstraintsNonNil(patchedPod) {
+				t.Error("/spec/topologySpreadConstraints field not found")
+			}
+			expectedLen := len(testCase.BeforeTopologySpreadConstraints) + len(testCase.TopologySpreadconstraintsAppending)
+			actualLen := len(patchedPod.Spec.TopologySpreadConstraints)
+			if actualLen != expectedLen {
+				t.Errorf("unexpected pod topologySpreadConstraints size: expected: %d, actual: %d", expectedLen, actualLen)
+			}
+		}
+	}
+}
+
+//
 // utilities
+//
+
+func topologySpreadConstraintsNonNil(pod *corev1.Pod) bool {
+	return pod.Spec.TopologySpreadConstraints != nil
+}
 
 func affinityFieldNonNil(pod *corev1.Pod) bool {
 	return pod.Spec.Affinity != nil
