@@ -2,13 +2,13 @@ apiVersion: v1
 entries:
   kep3633alt:
   - apiVersion: v2
-    appVersion: 0.0.0
-    created: "2023-07-22T18:21:13.312886139+09:00"
+    appVersion: 0.1.0
+    created: "2023-10-03T01:38:40.256935748+09:00"
     description: A Helm chart for Kubernetes
-    digest: f3d4c7028aab1f58e461eb3ef44af29b90ab4be867f69cd3025c60e4b006efd7
+    digest: 43eef15cfec8cdf1d9f7efa814f0a261ea08cf92ad21feca25015f432c243a28
     name: kep3633alt
     type: application
     urls:
     - kep3633alt-0.1.0.tgz
     version: 0.1.0
-generated: "2023-07-22T18:21:13.312090953+09:00"
+generated: "2023-10-03T01:38:40.255623262+09:00"
