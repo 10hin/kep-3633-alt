@@ -389,12 +389,10 @@ func matchLabelKeyToRequirement(matchLabelKey string, labels map[string]string) 
 			Values:   []string{v},
 		}
 	} else {
-		// TODO: If matchLabelKeys has key "foo", but the pod labels has no "foo" label, should affinity contain any terms?
-		// TODO: For example:
-		// matchExp = append(matchExp, metav1.LabelSelectorRequirement{
-		// 	Key:      k,
-		// 	Operator: metav1.LabelSelectorOpDoesNotExist,
-		// })
+		// In KEP 3243, matchLabelKeys introduced, clearly describes:
+		// "If the key does not exist, the element won't be ignored"
+		// (I think "won't be ignored" must be wrong and "won't be appended")
+		// https://docs.google.com/document/d/12F1YXsvy4SmumPiL3LHMLnuMHvyMqSzDqF-L9J37ZfA/edit?usp=sharing
 		return nil
 	}
 }
@@ -408,12 +406,10 @@ func mismatchLabelKeyToRequirement(matchLabelKey string, labels map[string]strin
 			Values:   []string{v},
 		}
 	} else {
-		// TODO: If matchLabelKeys has key "foo", but the pod labels has no "foo" label, should affinity contain any terms?
-		// TODO: For example:
-		// matchExp = append(matchExp, metav1.LabelSelectorRequirement{
-		// 	Key:      k,
-		// 	Operator: metav1.LabelSelectorOpDoesNotExist,
-		// })
+		// In KEP 3243, matchLabelKeys introduced, clearly describes:
+		// "If the key does not exist, the element won't be ignored"
+		// (I think "won't be ignored" must be wrong and "won't be appended")
+		// https://docs.google.com/document/d/12F1YXsvy4SmumPiL3LHMLnuMHvyMqSzDqF-L9J37ZfA/edit?usp=sharing
 		return nil
 	}
 }

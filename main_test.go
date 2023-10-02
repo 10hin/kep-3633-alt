@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	jsonpatch "gopkg.in/evanphx/json-patch.v5"
 	"testing"
+
+	"github.com/google/uuid"
+	jsonpatch "gopkg.in/evanphx/json-patch.v5"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,7 +29,7 @@ type testCreateAffinityJSONPatchCase struct {
 }
 
 func TestCreateAffinityJSONPatch(t *testing.T) {
-	testCases := make([]testCreateAffinityJSONPatchCase, 0, 1<<16)
+	testCases := make([]testCreateAffinityJSONPatchCase, 0, 1<<(8*testScaleIndex))
 	for bits := 0; bits < (1 << (8 * testScaleIndex)); bits++ {
 		var size int
 		testCase := testCreateAffinityJSONPatchCase{}
@@ -297,6 +299,117 @@ func TestCreateTopologySpreadConstrainsJSONPatch(t *testing.T) {
 				t.Errorf("unexpected pod topologySpreadConstraints size: expected: %d, actual: %d", expectedLen, actualLen)
 			}
 		}
+	}
+}
+
+type testMatchLabelKeyToRequirementCase struct {
+	MatchLabelKey       string
+	Labels              map[string]string
+	IsExpectedResultNil bool
+	ExpectedKeyValue    string
+}
+
+func TestMatchLabelKeyToRequirement(t *testing.T) {
+	testCases := make([]testMatchLabelKeyToRequirementCase, 0)
+
+	// case 1 no matching label key
+	testCases = append(testCases, testMatchLabelKeyToRequirementCase{
+		MatchLabelKey: uuid.New().String(),
+		Labels: map[string]string{
+			uuid.New().String(): uuid.New().String(),
+			uuid.New().String(): uuid.New().String(),
+			uuid.New().String(): uuid.New().String(),
+		},
+		IsExpectedResultNil: true,
+	})
+
+	// case 2 there are matching label key
+	expectedKey1 := uuid.New().String()
+	expectedValue1 := uuid.New().String()
+	testCases = append(testCases, testMatchLabelKeyToRequirementCase{
+		MatchLabelKey: expectedKey1,
+		Labels: map[string]string{
+			expectedKey1:        expectedValue1,
+			uuid.New().String(): uuid.New().String(),
+			uuid.New().String(): uuid.New().String(),
+		},
+		IsExpectedResultNil: false,
+		ExpectedKeyValue:    expectedValue1,
+	})
+
+	// TEST
+	for _, testCase := range testCases {
+		result := matchLabelKeyToRequirement(testCase.MatchLabelKey, testCase.Labels)
+
+		if testCase.IsExpectedResultNil {
+			if result != nil {
+				t.Error("result should be nil, but not", result)
+			}
+			continue
+		}
+
+		if result.Key != testCase.MatchLabelKey {
+			t.Error("returned requirements has unexpected key: ", result.Key)
+		}
+		if result.Operator != metav1.LabelSelectorOpIn {
+			t.Error("returned requirements has unexpected operator: ", result.Operator)
+		}
+		if result.Values == nil || len(result.Values) != 1 || result.Values[0] != testCase.ExpectedKeyValue {
+			t.Error("returned requirements has unexpected values: ", result.Values)
+		}
+
+	}
+}
+
+func TestMismatchLabelKeyToRequirement(t *testing.T) {
+	testCases := make([]testMatchLabelKeyToRequirementCase, 0)
+
+	// case 1 no matching label key
+	testCases = append(testCases, testMatchLabelKeyToRequirementCase{
+		MatchLabelKey: uuid.New().String(),
+		Labels: map[string]string{
+			uuid.New().String(): uuid.New().String(),
+			uuid.New().String(): uuid.New().String(),
+			uuid.New().String(): uuid.New().String(),
+		},
+		IsExpectedResultNil: true,
+	})
+
+	// case 2 there are matching label key
+	expectedKey1 := uuid.New().String()
+	expectedValue1 := uuid.New().String()
+	testCases = append(testCases, testMatchLabelKeyToRequirementCase{
+		MatchLabelKey: expectedKey1,
+		Labels: map[string]string{
+			expectedKey1:        expectedValue1,
+			uuid.New().String(): uuid.New().String(),
+			uuid.New().String(): uuid.New().String(),
+		},
+		IsExpectedResultNil: false,
+		ExpectedKeyValue:    expectedValue1,
+	})
+
+	// TEST
+	for _, testCase := range testCases {
+		result := mismatchLabelKeyToRequirement(testCase.MatchLabelKey, testCase.Labels)
+
+		if testCase.IsExpectedResultNil {
+			if result != nil {
+				t.Error("result should be nil, but not", result)
+			}
+			continue
+		}
+
+		if result.Key != testCase.MatchLabelKey {
+			t.Error("returned requirements has unexpected key: ", result.Key)
+		}
+		if result.Operator != metav1.LabelSelectorOpNotIn {
+			t.Error("returned requirements has unexpected operator: ", result.Operator)
+		}
+		if result.Values == nil || len(result.Values) != 1 || result.Values[0] != testCase.ExpectedKeyValue {
+			t.Error("returned requirements has unexpected values: ", result.Values)
+		}
+
 	}
 }
 
